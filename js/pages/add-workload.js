@@ -40,7 +40,7 @@ var PageAddWorkload = (function() {
           <!-- API Key row -->
           <div class="ai-key-input" id="aiKeyRow" style="${_getApiKey() ? 'display:none;' : ''}">
             <span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">🔑 API Key:</span>
-            <input type="password" id="aiApiKeyInput" placeholder="sk-ant-api03-..." value="${_getApiKey()}">
+            <input type="password" id="aiApiKeyInput" placeholder="sk-ant-api03-..." value="${_getApiKey()}" style="font-family:monospace;font-size:11px;">
             <button class="btn btn-secondary btn-sm" onclick="PageAddWorkload.saveApiKey()">บันทึก</button>
           </div>
           ${_getApiKey() ? '<div style="font-size:11px;color:var(--success);margin-bottom:8px;">✅ มี API Key แล้ว · <span style="cursor:pointer;color:var(--text-muted);" onclick="PageAddWorkload.clearApiKey()">เปลี่ยน</span></div>' : ''}
@@ -133,20 +133,20 @@ var PageAddWorkload = (function() {
   // ─── AI IMPORT HELPERS ───────────────────────────────────
   function _getApiKey() {
     var p = App.getProfile ? App.getProfile() : {};
-    return (p.apiKey) || localStorage.getItem('peach_openai_key') || '';
+    return (p.apiKey) || localStorage.getItem('peach_anthropic_key') || '';
   }
 
   function saveApiKey() {
     var val = (document.getElementById('aiApiKeyInput') || {}).value || '';
-    if (!val.startsWith('sk-')) { App.toast('OpenAI API Key ไม่ถูกต้อง (ต้องขึ้นต้นด้วย sk-)', 'error'); return; }
-    localStorage.setItem('peach_openai_key', val);
-    App.toast('บันทึก OpenAI API Key เรียบร้อย ✅', 'success');
+    if (!val.startsWith('sk-ant-')) { App.toast('Anthropic API Key ไม่ถูกต้อง (ต้องขึ้นต้นด้วย sk-ant-)', 'error'); return; }
+    localStorage.setItem('peach_anthropic_key', val);
+    App.toast('บันทึก Anthropic API Key เรียบร้อย ✅', 'success');
     var row = document.getElementById('aiKeyRow');
     if (row) row.style.display = 'none';
   }
 
   function clearApiKey() {
-    localStorage.removeItem('peach_openai_key');
+    localStorage.removeItem('peach_anthropic_key');
     App.toast('ลบ API Key แล้ว', 'info');
     var row = document.getElementById('aiKeyRow');
     if (row) row.style.display = 'flex';
@@ -184,11 +184,8 @@ var PageAddWorkload = (function() {
       var base64 = e.target.result.split(',')[1];
       var mediaType = _getMediaType(file.name, file.type);
 
-      // Route ผ่าน GAS backend ก่อน ถ้าไม่มีก็เรียก OpenAI โดยตรง
-      var useApi = !!API.getBaseUrl();
-      var promise = useApi
-        ? API.aiImport(base64, mediaType, file.name, apiKey)
-        : _callOpenAIDirectly(base64, mediaType, file.name, apiKey);
+      // เรียก Claude (Anthropic) โดยตรง (ไม่ต้องผ่าน GAS — ง่ายกว่าและเร็วกว่า)
+      var promise = _callClaudeDirectly(base64, mediaType, file.name, apiKey);
 
       promise.then(function(res) {
         if (res && res.success && res.data) {
@@ -214,38 +211,45 @@ var PageAddWorkload = (function() {
     return map[ext] || mimeType || 'application/octet-stream';
   }
 
-  // Direct OpenAI API call (fallback เมื่อไม่มี GAS)
-  function _callOpenAIDirectly(base64, mediaType, fileName, apiKey) {
+  // Direct Claude (Anthropic) API call
+  function _callClaudeDirectly(base64, mediaType, fileName, apiKey) {
     var isImage = mediaType.startsWith('image/');
-    var dataUrl = 'data:' + mediaType + ';base64,' + base64;
+    var isPDF   = mediaType === 'application/pdf';
 
-    var contentParts = isImage
-      ? [
-          { type: 'image_url', image_url: { url: dataUrl } },
-          { type: 'text', text: _buildPrompt(fileName) }
-        ]
-      : [
-          { type: 'text', text: _buildPrompt(fileName) }
-        ];
+    // Build content blocks สำหรับ Anthropic Messages API
+    var contentBlocks = [];
+    if (isImage) {
+      contentBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: mediaType, data: base64 }
+      });
+    } else if (isPDF) {
+      contentBlocks.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+      });
+    }
+    contentBlocks.push({ type: 'text', text: _buildPrompt(fileName) });
 
     var body = {
-      model: 'gpt-4o',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
-      messages: [{ role: 'user', content: contentParts }]
+      messages: [{ role: 'user', content: contentBlocks }]
     };
 
-    return fetch('https://api.openai.com/v1/chat/completions', {
+    return fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify(body)
     }).then(function(r) { return r.json(); })
       .then(function(res) {
-        if (res.error) return { success: false, error: res.error.message };
-        var text = (res.choices && res.choices[0] &&
-                    res.choices[0].message && res.choices[0].message.content) || '';
+        if (res.error) return { success: false, error: res.error.message || JSON.stringify(res.error) };
+        var text = (res.content && res.content[0] && res.content[0].text) || '';
         return _parseAiResponse(text);
       });
   }
