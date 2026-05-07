@@ -19,7 +19,7 @@ var PageAnnualSummary = (function() {
 
   function getTemplate() {
     return `
-      <!-- Year Selector -->
+      <!-- Year Selector + Export Dropdown -->
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
         <div class="year-selector">
           <button class="year-btn" onclick="PageAnnualSummary.changeYear(-1)">‹</button>
@@ -27,9 +27,30 @@ var PageAnnualSummary = (function() {
           <button class="year-btn" onclick="PageAnnualSummary.changeYear(1)">›</button>
           <span style="font-size:13px;color:var(--text-muted);">ปีงบประมาณ พ.ศ.</span>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="PageAnnualSummary.exportReport()">
-          📥 Export รายงาน
-        </button>
+
+        <!-- Export Dropdown -->
+        <div style="position:relative;" id="exportDropdownWrap">
+          <button class="btn btn-secondary btn-sm" onclick="PageAnnualSummary.toggleExportMenu(event)">
+            📥 Export ▾
+          </button>
+          <div id="exportMenu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);
+               background:var(--bg-card);border:1px solid var(--border);border-radius:10px;
+               min-width:180px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.35);overflow:hidden;">
+            <div class="export-menu-item" onclick="PageAnnualSummary.exportPDF()">
+              📄 <span>PDF (พิมพ์/บันทึก)</span>
+            </div>
+            <div class="export-menu-item" onclick="PageAnnualSummary.exportExcel()">
+              📊 <span>Excel (.xlsx)</span>
+            </div>
+            <div class="export-menu-item" onclick="PageAnnualSummary.exportWord()">
+              📝 <span>Word (.doc)</span>
+            </div>
+            <div style="border-top:1px solid var(--border);"></div>
+            <div class="export-menu-item" onclick="PageAnnualSummary.printReport()">
+              🖨️ <span>พิมพ์</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Loading -->
@@ -185,7 +206,6 @@ var PageAnnualSummary = (function() {
       }
     };
 
-    // Month count
     var ctxM = document.getElementById('summaryMonthChart');
     if (ctxM) {
       if (_charts.month) _charts.month.destroy();
@@ -196,7 +216,6 @@ var PageAnnualSummary = (function() {
       });
     }
 
-    // Hours
     var ctxH = document.getElementById('summaryHoursChart');
     if (ctxH) {
       if (_charts.hours) _charts.hours.destroy();
@@ -207,7 +226,6 @@ var PageAnnualSummary = (function() {
       });
     }
 
-    // Pie
     var summary = (d.summary||[]).filter(function(s){ return s.count > 0; });
     var ctxP = document.getElementById('summaryPieChart');
     if (ctxP && summary.length) {
@@ -306,40 +324,330 @@ var PageAnnualSummary = (function() {
     loadData();
   }
 
-  function exportReport() {
-    if (!_data) { App.toast('ยังไม่มีข้อมูลสำหรับ Export', 'error'); return; }
+  // ─── Export Dropdown Toggle ──────────────────────────────────
+  function toggleExportMenu(event) {
+    if (event) event.stopPropagation();
+    var menu = document.getElementById('exportMenu');
+    if (!menu) return;
+    var isOpen = menu.style.display !== 'none';
+    menu.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+      setTimeout(function() {
+        document.addEventListener('click', function closeMenu() {
+          var m = document.getElementById('exportMenu');
+          if (m) m.style.display = 'none';
+          document.removeEventListener('click', closeMenu);
+        });
+      }, 10);
+    }
+  }
 
-    var lines = [
-      'รายงานสรุปภาระงาน ปี พ.ศ. ' + _data.year,
-      'นางสาวธาราทิพย์ สูงขาว กองวิเทศสัมพันธ์ มหาวิทยาลัยมหาสารคาม',
-      '=' .repeat(60),
-      'จำนวนภาระงานทั้งหมด: ' + _data.total + ' รายการ',
-      'จำนวนชั่วโมงทั้งหมด: ' + (_data.totalHours||0).toFixed(0) + ' ชั่วโมง',
-      '',
-      'สรุปตามหมวดงาน:',
+  function _closeMenu() {
+    var menu = document.getElementById('exportMenu');
+    if (menu) menu.style.display = 'none';
+  }
+
+  function _getProfile() {
+    return (App.getProfile && App.getProfile()) || {};
+  }
+
+  function _getCatMap() {
+    var catMap = {};
+    DEMO_DATA.categories.forEach(function(c){ catMap[c.id] = c; });
+    return catMap;
+  }
+
+  // ─── PDF Export (print window) ───────────────────────────────
+  function exportPDF() {
+    _closeMenu();
+    if (!_data) { App.toast('ยังไม่มีข้อมูล', 'error'); return; }
+
+    var profile = _getProfile();
+    var ownerName = profile.name || 'นางสาวธาราทิพย์ สูงขาว';
+    var dept = profile.dept || 'กองวิเทศสัมพันธ์ มหาวิทยาลัยมหาสารคาม';
+    var catMap = _getCatMap();
+
+    var summaryRows = (_data.summary || []).map(function(s) {
+      return '<tr><td>' + s.icon + ' ' + s.categoryName + '</td>' +
+             '<td style="text-align:center;">' + s.count + '</td>' +
+             '<td style="text-align:center;">' + (s.hours||0) + '</td></tr>';
+    }).join('');
+
+    var workloadRows = (_data.allWorkloads || []).map(function(w, i) {
+      var cat = catMap[w.category] || {};
+      return '<tr>' +
+        '<td>' + (i+1) + '</td>' +
+        '<td>' + (w.title||'') + '</td>' +
+        '<td>' + (cat.name||w.category||'') + '</td>' +
+        '<td>' + App.formatThaiDate(w.workDate) + '</td>' +
+        '<td style="text-align:center;">' + (w.hours||0) + '</td>' +
+        '<td>' + (w.status||'') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var monthlyRows = (_data.monthly || []).map(function(m) {
+      return '<tr' + (m.count === 0 ? ' style="color:#999;"' : '') + '>' +
+        '<td>' + MONTH_TH[m.month] + '</td>' +
+        '<td style="text-align:center;">' + (m.count||'—') + '</td>' +
+        '<td style="text-align:center;">' + (m.hours > 0 ? m.hours : '—') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var dateStr = new Date().toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' });
+
+    var html = '<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">' +
+      '<title>รายงานสรุปภาระงาน ปี พ.ศ. ' + _data.year + '</title>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">' +
+      '<style>' +
+      '* { margin:0; padding:0; box-sizing:border-box; }' +
+      'body { font-family:"Prompt",Tahoma,sans-serif; font-size:11pt; color:#0F172A; background:#fff; }' +
+      '.header { background:#0F1117; color:#fff; padding:20px 32px; margin-bottom:0; }' +
+      '.header h1 { font-size:16pt; color:#22D3EE; margin-bottom:4px; }' +
+      '.header p { font-size:10pt; color:#94A3B8; }' +
+      '.content { padding:20px 32px; }' +
+      '.stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:20px; margin-top:16px; }' +
+      '.stat-box { border:1px solid #CBD5E1; border-radius:8px; padding:12px; text-align:center; }' +
+      '.stat-num { font-size:20pt; font-weight:700; color:#0891B2; }' +
+      '.stat-label { font-size:9pt; color:#64748B; margin-top:2px; }' +
+      'h2 { font-size:12pt; font-weight:600; color:#0F172A; border-left:4px solid #22D3EE; padding-left:10px; margin:18px 0 10px; }' +
+      'table { width:100%; border-collapse:collapse; font-size:10pt; page-break-inside:auto; }' +
+      'thead { background:#0F1117; color:#fff; }' +
+      'thead th { padding:7px 10px; text-align:left; font-weight:500; }' +
+      'tbody td { padding:6px 10px; border-bottom:1px solid #E2E8F0; vertical-align:top; }' +
+      'tbody tr:nth-child(even) { background:#F8FAFC; }' +
+      'tbody tr:hover { background:#EFF6FF; }' +
+      '.footer { margin-top:24px; text-align:center; font-size:9pt; color:#94A3B8; border-top:1px solid #E2E8F0; padding-top:10px; }' +
+      '@media print {' +
+      '  body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }' +
+      '  thead { -webkit-print-color-adjust:exact; print-color-adjust:exact; }' +
+      '  .no-print { display:none !important; }' +
+      '  tr { page-break-inside:avoid; }' +
+      '}' +
+      '</style></head><body>' +
+      '<div class="header">' +
+      '<h1>รายงานสรุปภาระงาน ปี พ.ศ. ' + _data.year + '</h1>' +
+      '<p>' + ownerName + ' · ' + dept + '</p>' +
+      '<p style="font-size:9pt;margin-top:2px;">วันที่จัดทำ: ' + dateStr + '</p>' +
+      '</div>' +
+      '<div class="content">' +
+      '<div class="stats-grid">' +
+      '<div class="stat-box"><div class="stat-num">' + _data.total + '</div><div class="stat-label">ภาระงานทั้งหมด</div></div>' +
+      '<div class="stat-box"><div class="stat-num">' + (_data.totalHours||0).toFixed(0) + '</div><div class="stat-label">ชั่วโมงรวม</div></div>' +
+      '<div class="stat-box"><div class="stat-num">' + (_data.total/12).toFixed(1) + '</div><div class="stat-label">เฉลี่ย/เดือน</div></div>' +
+      '<div class="stat-box"><div class="stat-num">' + (_data.summary||[]).length + '</div><div class="stat-label">หมวดงาน</div></div>' +
+      '</div>' +
+      '<h2>สรุปตามหมวดงาน</h2>' +
+      '<table><thead><tr><th>หมวดงาน</th><th>จำนวน (รายการ)</th><th>ชั่วโมง</th></tr></thead>' +
+      '<tbody>' + summaryRows + '</tbody></table>' +
+      '<h2>สรุปรายเดือน</h2>' +
+      '<table><thead><tr><th>เดือน</th><th>จำนวน</th><th>ชั่วโมง</th></tr></thead>' +
+      '<tbody>' + monthlyRows + '</tbody></table>' +
+      '<h2>รายการภาระงานทั้งหมด (' + _data.total + ' รายการ)</h2>' +
+      '<table><thead><tr><th>#</th><th>ชื่อภาระงาน</th><th>หมวด</th><th>วันที่</th><th>ชม.</th><th>สถานะ</th></tr></thead>' +
+      '<tbody>' + workloadRows + '</tbody></table>' +
+      '<div class="footer">สร้างโดย PEACH Workload Portfolio · ' + dateStr + '</div>' +
+      '</div>' +
+      '<script>window.onload = function(){ window.print(); }<\/script>' +
+      '</body></html>';
+
+    var win = window.open('', '_blank', 'width=900,height=700');
+    if (!win) { App.toast('กรุณาอนุญาต Popup เพื่อ Export PDF', 'error'); return; }
+    win.document.write(html);
+    win.document.close();
+    App.toast('เปิดหน้า PDF แล้ว — กด Ctrl+P → บันทึกเป็น PDF', 'info');
+  }
+
+  // ─── Excel Export (.xlsx) ────────────────────────────────────
+  function exportExcel() {
+    _closeMenu();
+    if (!_data) { App.toast('ยังไม่มีข้อมูล', 'error'); return; }
+
+    if (typeof XLSX === 'undefined') {
+      App.toast('กำลังโหลด Excel library...', 'info');
+      var script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.onload = function() { _doExcelExport(); };
+      script.onerror = function() { App.toast('โหลด library ไม่สำเร็จ', 'error'); };
+      document.head.appendChild(script);
+    } else {
+      _doExcelExport();
+    }
+  }
+
+  function _doExcelExport() {
+    var catMap = _getCatMap();
+    var profile = _getProfile();
+    var ownerName = profile.name || 'นางสาวธาราทิพย์ สูงขาว';
+    var dateStr = new Date().toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' });
+
+    // Sheet 1 — สรุป
+    var sheetSummary = [
+      ['รายงานสรุปภาระงาน ปี พ.ศ. ' + _data.year],
+      [ownerName],
+      ['วันที่จัดทำ: ' + dateStr],
+      [],
+      ['รายการ', 'ค่า', 'หน่วย'],
+      ['ภาระงานทั้งหมด', _data.total, 'รายการ'],
+      ['ชั่วโมงรวม', (_data.totalHours||0).toFixed(0), 'ชั่วโมง'],
+      ['เฉลี่ยต่อเดือน', (_data.total/12).toFixed(1), 'รายการ/เดือน'],
+      ['หมวดงานที่ทำ', (_data.summary||[]).length, 'หมวด'],
+      [],
+      ['สรุปตามหมวดงาน'],
+      ['หมวดงาน', 'จำนวน (รายการ)', 'ชั่วโมง'],
     ];
-
     (_data.summary||[]).forEach(function(s) {
-      lines.push('  ' + s.icon + ' ' + s.categoryName + ': ' + s.count + ' รายการ (' + s.hours + ' h)');
+      sheetSummary.push([s.icon + ' ' + s.categoryName, s.count, s.hours || 0]);
     });
 
-    lines.push('', 'รายการภาระงานทั้งหมด:', '-'.repeat(60));
+    // Sheet 2 — ภาระงานทั้งหมด
+    var sheetWorkloads = [
+      ['#', 'ชื่อภาระงาน', 'หมวดงาน', 'วันที่', 'ชั่วโมง', 'สถานะ', 'รายละเอียด']
+    ];
     (_data.allWorkloads||[]).forEach(function(w, i) {
-      lines.push((i+1) + '. ' + w.title);
-      lines.push('   วันที่: ' + App.formatThaiDate(w.workDate) + ' | ชม.: ' + w.hours + ' | สถานะ: ' + (w.status||''));
-      if (w.detail) lines.push('   รายละเอียด: ' + w.detail);
-      lines.push('');
+      var cat = catMap[w.category] || {};
+      sheetWorkloads.push([
+        i + 1,
+        w.title || '',
+        (cat.name || w.category || ''),
+        App.formatThaiDate(w.workDate),
+        w.hours || 0,
+        w.status || '',
+        w.detail || ''
+      ]);
     });
 
-    var blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    // Sheet 3 — รายเดือน
+    var sheetMonthly = [['เดือน', 'จำนวนภาระงาน', 'ชั่วโมง']];
+    (_data.monthly||[]).forEach(function(m) {
+      sheetMonthly.push([MONTH_TH[m.month], m.count, m.hours || 0]);
+    });
+
+    var wb = XLSX.utils.book_new();
+    var ws1 = XLSX.utils.aoa_to_sheet(sheetSummary);
+    var ws2 = XLSX.utils.aoa_to_sheet(sheetWorkloads);
+    var ws3 = XLSX.utils.aoa_to_sheet(sheetMonthly);
+
+    // Column widths
+    ws2['!cols'] = [{ wch:4 }, { wch:40 }, { wch:20 }, { wch:16 }, { wch:8 }, { wch:14 }, { wch:40 }];
+    ws3['!cols'] = [{ wch:14 }, { wch:16 }, { wch:10 }];
+
+    XLSX.utils.book_append_sheet(wb, ws1, 'สรุปภาพรวม');
+    XLSX.utils.book_append_sheet(wb, ws2, 'ภาระงานทั้งหมด');
+    XLSX.utils.book_append_sheet(wb, ws3, 'รายเดือน');
+
+    XLSX.writeFile(wb, 'รายงานภาระงาน_' + _data.year + '.xlsx');
+    App.toast('Export Excel เรียบร้อย ✅', 'success');
+  }
+
+  // ─── Word Export (.doc) ──────────────────────────────────────
+  function exportWord() {
+    _closeMenu();
+    if (!_data) { App.toast('ยังไม่มีข้อมูล', 'error'); return; }
+
+    var catMap = _getCatMap();
+    var profile = _getProfile();
+    var ownerName = profile.name || 'นางสาวธาราทิพย์ สูงขาว';
+    var dept = profile.dept || 'กองวิเทศสัมพันธ์ มหาวิทยาลัยมหาสารคาม';
+    var dateStr = new Date().toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' });
+
+    var summaryRows = (_data.summary||[]).map(function(s) {
+      return '<tr><td>' + s.icon + ' ' + s.categoryName + '</td>' +
+             '<td align="center">' + s.count + ' รายการ</td>' +
+             '<td align="center">' + (s.hours||0) + ' ชม.</td></tr>';
+    }).join('');
+
+    var monthlyRows = (_data.monthly||[]).map(function(m) {
+      return '<tr><td>' + MONTH_TH[m.month] + '</td>' +
+             '<td align="center">' + (m.count || '—') + '</td>' +
+             '<td align="center">' + (m.hours > 0 ? m.hours : '—') + '</td></tr>';
+    }).join('');
+
+    var workloadRows = (_data.allWorkloads||[]).map(function(w, i) {
+      var cat = catMap[w.category] || {};
+      return '<tr><td align="center">' + (i+1) + '</td>' +
+             '<td>' + (w.title||'') + '</td>' +
+             '<td>' + (cat.name||'') + '</td>' +
+             '<td>' + App.formatThaiDate(w.workDate) + '</td>' +
+             '<td align="center">' + (w.hours||0) + '</td>' +
+             '<td>' + (w.status||'') + '</td></tr>';
+    }).join('');
+
+    var html = "<html xmlns:o='urn:schemas-microsoft-com:office:office' " +
+      "xmlns:w='urn:schemas-microsoft-com:office:word' " +
+      "xmlns='http://www.w3.org/TR/REC-html40'>\n" +
+      "<head><meta charset='utf-8'>\n" +
+      "<style>\n" +
+      "body { font-family:'Cordia New',Tahoma,sans-serif; font-size:14pt; margin:2cm; }\n" +
+      "h1 { font-size:18pt; color:#0C4A6E; border-bottom:2pt solid #0891B2; padding-bottom:6pt; }\n" +
+      "h2 { font-size:13pt; color:#0C4A6E; margin-top:14pt; border-left:4pt solid #0891B2; padding-left:8pt; }\n" +
+      ".meta { font-size:11pt; color:#475569; margin-bottom:4pt; }\n" +
+      ".stats { width:100%; border-collapse:collapse; margin:10pt 0; }\n" +
+      ".stats td { padding:6pt 10pt; border:1pt solid #CBD5E1; }\n" +
+      ".stats .label { background:#F1F5F9; font-weight:bold; width:40%; }\n" +
+      "table { width:100%; border-collapse:collapse; font-size:11pt; margin:8pt 0; }\n" +
+      "th { background:#0F1117; color:white; padding:6pt 8pt; text-align:left; }\n" +
+      "td { padding:5pt 8pt; border:1pt solid #CBD5E1; }\n" +
+      "tr:nth-child(even) td { background:#F8FAFC; }\n" +
+      ".footer { font-size:9pt; color:#94A3B8; text-align:center; margin-top:20pt; border-top:1pt solid #E2E8F0; padding-top:8pt; }\n" +
+      "</style></head><body>\n" +
+      "<h1>รายงานสรุปภาระงาน ปี พ.ศ. " + _data.year + "</h1>\n" +
+      "<p class='meta'>" + ownerName + " · " + dept + "</p>\n" +
+      "<p class='meta'>วันที่จัดทำ: " + dateStr + "</p>\n" +
+
+      "<h2>สถิติภาพรวม</h2>\n" +
+      "<table class='stats'>\n" +
+      "<tr><td class='label'>ภาระงานทั้งหมด</td><td>" + _data.total + " รายการ</td></tr>\n" +
+      "<tr><td class='label'>ชั่วโมงรวม</td><td>" + (_data.totalHours||0).toFixed(0) + " ชั่วโมง</td></tr>\n" +
+      "<tr><td class='label'>เฉลี่ยต่อเดือน</td><td>" + (_data.total/12).toFixed(1) + " รายการ/เดือน</td></tr>\n" +
+      "<tr><td class='label'>หมวดงานที่ทำ</td><td>" + (_data.summary||[]).length + " จาก 12 หมวด</td></tr>\n" +
+      "</table>\n" +
+
+      "<h2>สรุปตามหมวดงาน</h2>\n" +
+      "<table><thead><tr><th>หมวดงาน</th><th>จำนวน</th><th>ชั่วโมง</th></tr></thead>\n" +
+      "<tbody>" + summaryRows + "</tbody></table>\n" +
+
+      "<h2>สรุปรายเดือน</h2>\n" +
+      "<table><thead><tr><th>เดือน</th><th>จำนวน</th><th>ชั่วโมง</th></tr></thead>\n" +
+      "<tbody>" + monthlyRows + "</tbody></table>\n" +
+
+      "<h2>รายการภาระงานทั้งหมด (" + _data.total + " รายการ)</h2>\n" +
+      "<table><thead><tr><th>#</th><th>ชื่อภาระงาน</th><th>หมวด</th><th>วันที่</th><th>ชม.</th><th>สถานะ</th></tr></thead>\n" +
+      "<tbody>" + workloadRows + "</tbody></table>\n" +
+
+      "<div class='footer'>สร้างโดย PEACH Workload Portfolio · " + dateStr + "</div>\n" +
+      "</body></html>";
+
+    var blob = new Blob(['﻿', html], { type: 'application/msword;charset=utf-8' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
-    a.download = 'รายงานภาระงาน_' + _data.year + '.txt';
+    a.download = 'รายงานภาระงาน_' + _data.year + '.doc';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    App.toast('Export รายงานเรียบร้อย', 'success');
+    App.toast('Export Word เรียบร้อย ✅', 'success');
   }
 
-  return { render: render, changeYear: changeYear, exportReport: exportReport };
+  // ─── Print ───────────────────────────────────────────────────
+  function printReport() {
+    _closeMenu();
+    exportPDF(); // เปิดหน้า print แล้วให้ browser จัดการ
+  }
+
+  // ─── Legacy (backwards compat) ───────────────────────────────
+  function exportReport() {
+    toggleExportMenu({ stopPropagation: function(){} });
+  }
+
+  return {
+    render: render,
+    changeYear: changeYear,
+    exportReport: exportReport,
+    toggleExportMenu: toggleExportMenu,
+    exportPDF: exportPDF,
+    exportExcel: exportExcel,
+    exportWord: exportWord,
+    printReport: printReport,
+  };
 })();
