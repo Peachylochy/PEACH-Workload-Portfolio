@@ -921,3 +921,19 @@ select.form-control { cursor: pointer; }
   font-family: var(--font); font-size: 12px; outline: none;
 }
 .ai-key-input input:focus { border-color: var(--accent); }
+
+/* ─── EXPORT DROPDOWN MENU ───────────────────────────────── */
+.export-menu-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  transition: background 0.15s;
+}
+.export-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
