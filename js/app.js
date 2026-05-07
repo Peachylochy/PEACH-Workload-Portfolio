@@ -7,6 +7,16 @@ var App = (function() {
 
   var _currentYear = '2567';
   var _currentPage = '';
+  var _theme = 'dark'; // 'dark' | 'light'
+  var _profile = {
+    name: 'นางสาวธาราทิพย์ สูงขาว',
+    position: 'นักวิชาการศึกษา',
+    dept: 'กองวิเทศสัมพันธ์ มหาวิทยาลัยมหาสารคาม',
+    year: '2567',
+    email: '',
+    avatar: null, // base64
+    apiKey: '',
+  };
 
   // ─── Page Registry ────────────────────────────────────────
   var PAGES = {
@@ -19,19 +29,148 @@ var App = (function() {
 
   // ─── INIT ─────────────────────────────────────────────────
   function init() {
-    // Load saved year
     _currentYear = localStorage.getItem('peach_year') || '2567';
     updateYearDisplay();
+    initTheme();
+    initProfile();
 
-    // Check for API URL
-    if (!API.getBaseUrl()) {
-      showDemoNotice();
-    }
+    if (!API.getBaseUrl()) showDemoNotice();
 
-    // Hash-based routing
     window.addEventListener('hashchange', onHashChange);
     onHashChange();
   }
+
+  // ─── THEME ────────────────────────────────────────────────
+  function initTheme() {
+    _theme = localStorage.getItem('peach_theme') || 'dark';
+    applyTheme(_theme);
+  }
+
+  function applyTheme(theme) {
+    _theme = theme;
+    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '');
+    var btn = document.getElementById('themeToggleBtn');
+    if (btn) btn.textContent = theme === 'light' ? '☀️' : '🌙';
+    localStorage.setItem('peach_theme', theme);
+  }
+
+  function toggleTheme() {
+    applyTheme(_theme === 'dark' ? 'light' : 'dark');
+  }
+
+  // ─── PROFILE ──────────────────────────────────────────────
+  function initProfile() {
+    var saved = localStorage.getItem('peach_profile');
+    if (saved) {
+      try { _profile = Object.assign(_profile, JSON.parse(saved)); } catch(e) {}
+    }
+    renderProfileUI();
+  }
+
+  function renderProfileUI() {
+    // Sidebar
+    var sn = document.getElementById('sidebarOwnerName');
+    var sd = document.getElementById('sidebarOwnerDept');
+    var sa = document.getElementById('sidebarAvatar');
+    if (sn) sn.textContent = _profile.name.replace('นางสาว','').replace('นาย','').replace('นาง','').trim();
+    if (sd) sd.textContent = _profile.dept.length > 28 ? _profile.dept.substring(0,28)+'…' : _profile.dept;
+    if (sa) {
+      if (_profile.avatar) {
+        sa.innerHTML = '<img src="'+_profile.avatar+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+      } else {
+        sa.textContent = _profile.name.charAt(_profile.name.length > 4 ? _profile.name.length - 2 : 0) || 'ท';
+      }
+    }
+    // Header
+    var hn = document.getElementById('headerProfileName');
+    var ha = document.getElementById('headerAvatarWrap');
+    var hi = document.getElementById('headerAvatarInitial');
+    if (hn) hn.textContent = _profile.name.replace(/^(นางสาว|นาย|นาง)\s*/,'').split(' ')[0];
+    if (_profile.avatar && ha) {
+      ha.innerHTML = '<img src="'+_profile.avatar+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+    } else if (hi) {
+      var initial = _profile.name.replace(/^(นางสาว|นาย|นาง)\s*/,'').charAt(0) || 'ท';
+      hi.textContent = initial;
+    }
+    // Year
+    if (_profile.year) {
+      _currentYear = _profile.year;
+      updateYearDisplay();
+    }
+  }
+
+  function openProfile() {
+    var m = document.getElementById('profileModal');
+    if (!m) return;
+    document.getElementById('pName').value = _profile.name;
+    document.getElementById('pPosition').value = _profile.position;
+    document.getElementById('pDept').value = _profile.dept;
+    document.getElementById('pYear').value = _profile.year;
+    document.getElementById('pEmail').value = _profile.email || '';
+    document.getElementById('pApiKey').value = _profile.apiKey || '';
+    // Avatar preview
+    var zone = document.getElementById('avatarZone');
+    var ph = document.getElementById('avatarPlaceholder');
+    if (_profile.avatar && zone) {
+      zone.innerHTML = '<img src="'+_profile.avatar+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+    } else if (ph) { ph.textContent = '👤'; }
+    _updateProfilePreview();
+    m.style.display = 'flex';
+  }
+
+  function _updateProfilePreview() {
+    var name = (document.getElementById('pName')||{}).value || _profile.name;
+    var pos  = (document.getElementById('pPosition')||{}).value || _profile.position;
+    var dept = (document.getElementById('pDept')||{}).value || _profile.dept;
+    var pn = document.getElementById('profilePreviewName');
+    var pp = document.getElementById('profilePreviewPos');
+    var pd = document.getElementById('profilePreviewDept');
+    if (pn) pn.textContent = name;
+    if (pp) pp.textContent = pos;
+    if (pd) pd.textContent = dept.length > 32 ? dept.substring(0,32)+'…' : dept;
+  }
+
+  function closeProfile() {
+    var m = document.getElementById('profileModal');
+    if (m) m.style.display = 'none';
+  }
+
+  function saveProfile() {
+    _profile.name     = document.getElementById('pName').value.trim() || _profile.name;
+    _profile.position = document.getElementById('pPosition').value.trim();
+    _profile.dept     = document.getElementById('pDept').value.trim();
+    _profile.year     = document.getElementById('pYear').value || '2567';
+    _profile.email    = document.getElementById('pEmail').value.trim();
+    _profile.apiKey   = document.getElementById('pApiKey').value.trim();
+
+    localStorage.setItem('peach_profile', JSON.stringify(_profile));
+    _currentYear = _profile.year;
+    localStorage.setItem('peach_year', _currentYear);
+
+    renderProfileUI();
+    closeProfile();
+    toast('บันทึกโปรไฟล์เรียบร้อย ✅', 'success');
+
+    // Sync to Sheets if API available
+    if (API.getBaseUrl()) {
+      API.updateProfile(_profile).catch(function(){});
+    }
+  }
+
+  function onAvatarChange(input) {
+    var file = input.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast('รูปขนาดเกิน 2MB', 'error'); return; }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      _profile.avatar = e.target.result;
+      var zone = document.getElementById('avatarZone');
+      if (zone) zone.innerHTML = '<img src="'+e.target.result+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function getProfile() { return _profile; }
 
   function onHashChange() {
     var hash = window.location.hash.replace('#', '') || 'dashboard';
@@ -275,6 +414,12 @@ var App = (function() {
     formatThaiDate: formatThaiDate,
     toast: toast,
     openWorkload: openWorkload,
+    toggleTheme: toggleTheme,
+    openProfile: openProfile,
+    closeProfile: closeProfile,
+    saveProfile: saveProfile,
+    onAvatarChange: onAvatarChange,
+    getProfile: getProfile,
   };
 })();
 

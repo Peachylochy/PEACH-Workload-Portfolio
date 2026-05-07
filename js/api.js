@@ -107,6 +107,32 @@ var API = (function() {
     return get('settings');
   }
 
+  // ─── PROFILE ──────────────────────────────────────────────
+  function updateProfile(profile) {
+    return post('settings', 'updateProfile', {
+      name: profile.name, position: profile.position,
+      dept: profile.dept, year: profile.year, email: profile.email
+    });
+  }
+
+  // ─── AI IMPORT (proxy ผ่าน GAS → Claude API) ──────────────
+  function aiImport(fileBase64, fileMediaType, fileName, apiKey) {
+    var url = getBaseUrl();
+    if (!url) return Promise.reject(new Error('ยังไม่ได้ตั้งค่า API URL'));
+    return fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({
+        resource: 'ai-import',
+        action: 'extract',
+        fileBase64: fileBase64,
+        fileMediaType: fileMediaType,
+        fileName: fileName,
+        apiKey: apiKey,
+      }),
+      headers: { 'Content-Type': 'text/plain' }
+    }).then(function(r) { return r.json(); });
+  }
+
   // ─── SEED DATA ────────────────────────────────────────────
   function seed() {
     return post('seed', 'seed', {});
@@ -132,6 +158,8 @@ var API = (function() {
     getDashboard: getDashboard,
     getAnnualSummary: getAnnualSummary,
     getSettings: getSettings,
+    updateProfile: updateProfile,
+    aiImport: aiImport,
     seed: seed,
     init: init,
   };
