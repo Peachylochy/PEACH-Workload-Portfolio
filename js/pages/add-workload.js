@@ -133,21 +133,20 @@ var PageAddWorkload = (function() {
   // ─── AI IMPORT HELPERS ───────────────────────────────────
   function _getApiKey() {
     var p = App.getProfile ? App.getProfile() : {};
-    return (p.apiKey) || localStorage.getItem('peach_anthropic_key') || '';
+    return (p.apiKey) || localStorage.getItem('peach_gemini_key') || '';
   }
 
   function saveApiKey() {
     var val = (document.getElementById('aiApiKeyInput') || {}).value || '';
-    if (!val.startsWith('sk-')) { App.toast('API Key ไม่ถูกต้อง (ต้องขึ้นต้นด้วย sk-)', 'error'); return; }
-    localStorage.setItem('peach_anthropic_key', val);
-    App.toast('บันทึก API Key เรียบร้อย', 'success');
-    // Re-render the AI box
-    var box = document.getElementById('aiImportBox');
-    if (box) { var row = document.getElementById('aiKeyRow'); if(row) row.style.display='none'; }
+    if (!val.startsWith('AIza')) { App.toast('Gemini API Key ไม่ถูกต้อง (ต้องขึ้นต้นด้วย AIza)', 'error'); return; }
+    localStorage.setItem('peach_gemini_key', val);
+    App.toast('บันทึก Gemini API Key เรียบร้อย ✅', 'success');
+    var row = document.getElementById('aiKeyRow');
+    if (row) row.style.display = 'none';
   }
 
   function clearApiKey() {
-    localStorage.removeItem('peach_anthropic_key');
+    localStorage.removeItem('peach_gemini_key');
     App.toast('ลบ API Key แล้ว', 'info');
     var row = document.getElementById('aiKeyRow');
     if (row) row.style.display = 'flex';
@@ -185,11 +184,11 @@ var PageAddWorkload = (function() {
       var base64 = e.target.result.split(',')[1];
       var mediaType = _getMediaType(file.name, file.type);
 
-      // Route ผ่าน GAS backend (เพื่อหลีกเลี่ยง CORS)
+      // Route ผ่าน GAS backend ก่อน ถ้าไม่มีก็เรียก Gemini โดยตรง (ไม่มีปัญหา CORS)
       var useApi = !!API.getBaseUrl();
       var promise = useApi
         ? API.aiImport(base64, mediaType, file.name, apiKey)
-        : _callClaudeDirectly(base64, mediaType, file.name, apiKey);
+        : _callGeminiDirectly(base64, mediaType, file.name, apiKey);
 
       promise.then(function(res) {
         if (res && res.success && res.data) {
@@ -215,45 +214,33 @@ var PageAddWorkload = (function() {
     return map[ext] || mimeType || 'application/octet-stream';
   }
 
-  // Direct Claude API call (fallback เมื่อไม่มี GAS)
-  function _callClaudeDirectly(base64, mediaType, fileName, apiKey) {
-    var isImage = mediaType.startsWith('image/');
-    var isPdf   = mediaType === 'application/pdf';
-
-    var contentBlock;
-    if (isImage) {
-      contentBlock = { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
-    } else if (isPdf) {
-      contentBlock = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } };
-    } else {
-      return Promise.resolve({ success: false, error: 'ไฟล์ประเภทนี้ต้องใช้ผ่าน GAS Backend' });
-    }
+  // Direct Gemini API call (fallback เมื่อไม่มี GAS) — ไม่มีปัญหา CORS
+  function _callGeminiDirectly(base64, mediaType, fileName, apiKey) {
+    var model = 'gemini-2.0-flash';
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+              model + ':generateContent?key=' + apiKey;
 
     var body = {
-      model: 'claude-sonnet-4-5-20251001',
-      max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: [
-          contentBlock,
-          { type: 'text', text: _buildPrompt(fileName) }
+      contents: [{
+        parts: [
+          { inline_data: { mime_type: mediaType, data: base64 } },
+          { text: _buildPrompt(fileName) }
         ]
-      }]
+      }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
     };
 
-    return fetch('https://api.anthropic.com/v1/messages', {
+    return fetch(url, {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }).then(function(r) { return r.json(); })
       .then(function(res) {
         if (res.error) return { success: false, error: res.error.message };
-        var text = res.content && res.content[0] && res.content[0].text || '';
+        var text = (res.candidates && res.candidates[0] &&
+                    res.candidates[0].content && res.candidates[0].content.parts &&
+                    res.candidates[0].content.parts[0] &&
+                    res.candidates[0].content.parts[0].text) || '';
         return _parseAiResponse(text);
       });
   }
