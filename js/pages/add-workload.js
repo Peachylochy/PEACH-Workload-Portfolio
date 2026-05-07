@@ -133,20 +133,20 @@ var PageAddWorkload = (function() {
   // ─── AI IMPORT HELPERS ───────────────────────────────────
   function _getApiKey() {
     var p = App.getProfile ? App.getProfile() : {};
-    return (p.apiKey) || localStorage.getItem('peach_gemini_key') || '';
+    return (p.apiKey) || localStorage.getItem('peach_openai_key') || '';
   }
 
   function saveApiKey() {
     var val = (document.getElementById('aiApiKeyInput') || {}).value || '';
-    if (!val.startsWith('AIza')) { App.toast('Gemini API Key ไม่ถูกต้อง (ต้องขึ้นต้นด้วย AIza)', 'error'); return; }
-    localStorage.setItem('peach_gemini_key', val);
-    App.toast('บันทึก Gemini API Key เรียบร้อย ✅', 'success');
+    if (!val.startsWith('sk-')) { App.toast('OpenAI API Key ไม่ถูกต้อง (ต้องขึ้นต้นด้วย sk-)', 'error'); return; }
+    localStorage.setItem('peach_openai_key', val);
+    App.toast('บันทึก OpenAI API Key เรียบร้อย ✅', 'success');
     var row = document.getElementById('aiKeyRow');
     if (row) row.style.display = 'none';
   }
 
   function clearApiKey() {
-    localStorage.removeItem('peach_gemini_key');
+    localStorage.removeItem('peach_openai_key');
     App.toast('ลบ API Key แล้ว', 'info');
     var row = document.getElementById('aiKeyRow');
     if (row) row.style.display = 'flex';
@@ -184,11 +184,11 @@ var PageAddWorkload = (function() {
       var base64 = e.target.result.split(',')[1];
       var mediaType = _getMediaType(file.name, file.type);
 
-      // Route ผ่าน GAS backend ก่อน ถ้าไม่มีก็เรียก Gemini โดยตรง (ไม่มีปัญหา CORS)
+      // Route ผ่าน GAS backend ก่อน ถ้าไม่มีก็เรียก OpenAI โดยตรง
       var useApi = !!API.getBaseUrl();
       var promise = useApi
         ? API.aiImport(base64, mediaType, file.name, apiKey)
-        : _callGeminiDirectly(base64, mediaType, file.name, apiKey);
+        : _callOpenAIDirectly(base64, mediaType, file.name, apiKey);
 
       promise.then(function(res) {
         if (res && res.success && res.data) {
@@ -214,33 +214,38 @@ var PageAddWorkload = (function() {
     return map[ext] || mimeType || 'application/octet-stream';
   }
 
-  // Direct Gemini API call (fallback เมื่อไม่มี GAS) — ไม่มีปัญหา CORS
-  function _callGeminiDirectly(base64, mediaType, fileName, apiKey) {
-    var model = 'gemini-2.0-flash';
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
-              model + ':generateContent?key=' + apiKey;
+  // Direct OpenAI API call (fallback เมื่อไม่มี GAS)
+  function _callOpenAIDirectly(base64, mediaType, fileName, apiKey) {
+    var isImage = mediaType.startsWith('image/');
+    var dataUrl = 'data:' + mediaType + ';base64,' + base64;
+
+    var contentParts = isImage
+      ? [
+          { type: 'image_url', image_url: { url: dataUrl } },
+          { type: 'text', text: _buildPrompt(fileName) }
+        ]
+      : [
+          { type: 'text', text: _buildPrompt(fileName) }
+        ];
 
     var body = {
-      contents: [{
-        parts: [
-          { inline_data: { mime_type: mediaType, data: base64 } },
-          { text: _buildPrompt(fileName) }
-        ]
-      }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
+      model: 'gpt-4o',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: contentParts }]
     };
 
-    return fetch(url, {
+    return fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
       body: JSON.stringify(body)
     }).then(function(r) { return r.json(); })
       .then(function(res) {
         if (res.error) return { success: false, error: res.error.message };
-        var text = (res.candidates && res.candidates[0] &&
-                    res.candidates[0].content && res.candidates[0].content.parts &&
-                    res.candidates[0].content.parts[0] &&
-                    res.candidates[0].content.parts[0].text) || '';
+        var text = (res.choices && res.choices[0] &&
+                    res.choices[0].message && res.choices[0].message.content) || '';
         return _parseAiResponse(text);
       });
   }
